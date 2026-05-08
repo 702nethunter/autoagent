@@ -18,13 +18,8 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
       - name: Install dependencies
-        run: pip install pyodbc requests
+        run: pip3 install pyodbc requests --break-system-packages --quiet
 
       - name: Run agents on issue
         env:
@@ -37,14 +32,12 @@ jobs:
           SQL_PASSWORD: ${{ secrets.SQL_PASSWORD }}
           SQL_USER:     ${{ secrets.SQL_USER }}
           SQL_DATABASE: ${{ secrets.SQL_DATABASE }}
-        run: |
-          cd dev_agents
-          python3 run_from_issue.py
+        run: python3 run_from_issue.py
 
       - name: Upload agent logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: agent-run-${{ github.event.issue.number }}
-          path: dev_agents/agent_run.log
+          path: agent_run.log
           retention-days: 7
