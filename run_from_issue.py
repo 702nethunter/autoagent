@@ -59,7 +59,7 @@ for var, key in [
 # ── Import agents (after env override) ────────────────────────────────────────
 import config                                           # noqa: E402
 import memory_store as ms                               # noqa: E402
-from dev_agent import CppDeveloperAgent, DotNetDeveloperAgent  # noqa: E402
+from dev_agent import CppDeveloperAgent, DotNetDeveloperAgent, ReactDeveloperAgent  # noqa: E402
 from pm_agent import ProjectManagerAgent               # noqa: E402
 
 
@@ -215,14 +215,16 @@ def main() -> None:
     pm      = ProjectManagerAgent()
     dotnet  = DotNetDeveloperAgent()
     cpp_dev = CppDeveloperAgent()
+    react   = ReactDeveloperAgent()
     pm.register_dev(dotnet)
     pm.register_dev(cpp_dev)
+    pm.register_dev(react)
 
     # ── Sprint planning ────────────────────────────────────────────────────────
     sprint_plan_id = pm.plan_sprint(feature, sprint_name=f"Issue-{ISSUE_NUMBER}")
 
     # ── One sprint day ─────────────────────────────────────────────────────────
-    for dev in (dotnet, cpp_dev):
+    for dev in (dotnet, cpp_dev, react):
         dev.act()
 
     pm.handle_escalations()

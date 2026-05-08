@@ -189,3 +189,46 @@ class CppDeveloperAgent(DeveloperAgent):
                 "You care deeply about correctness and zero-overhead abstractions."
             ),
         )
+
+
+class ReactDeveloperAgent(DeveloperAgent):
+    technology   = "React 18 / TypeScript / Vite / Tailwind CSS"
+    tech_context = (
+        "You build React applications using functional components and hooks only — "
+        "no class components. You use TypeScript strictly (no `any`). "
+        "You prefer Zustand or React Query for state/server-state management. "
+        "You use Vite as the build tool, Tailwind CSS for styling, "
+        "React Router v6 for routing, and Vitest + React Testing Library for tests. "
+        "You structure projects as: src/components/, src/pages/, src/hooks/, "
+        "src/services/ (API calls), src/store/ (global state). "
+        "You always consider accessibility (ARIA), responsive design, and lazy loading."
+    )
+
+    def __init__(self, name: str = "React Developer"):
+        super().__init__(
+            name    = name,
+            role    = "react",
+            persona = (
+                "You are a senior React/TypeScript frontend engineer with 7 years of experience. "
+                "You are expert in building performant, accessible single-page applications. "
+                "You know React 18 concurrent features, Suspense, and Server Components. "
+                "You care about UX, Core Web Vitals, and pixel-perfect implementation. "
+                "You integrate REST and GraphQL APIs and handle auth flows (JWT, OAuth)."
+            ),
+        )
+
+    def _implementation_prompt(self, task_title: str, task_desc: str, ctx: str) -> str:
+        return (
+            f"{self._build_system_prompt()}\n\n"
+            f"Technology stack: {self.technology}\n"
+            f"{self.tech_context}\n\n"
+            f"Relevant memory / prior work:\n{ctx}\n\n"
+            f"Task assigned to you: {task_title}\n"
+            f"Details: {task_desc or '(no additional details)'}\n\n"
+            f"Write a concise implementation plan (3-5 bullet points) covering:\n"
+            f"  • Component hierarchy and file structure\n"
+            f"  • State management approach\n"
+            f"  • API integration points\n"
+            f"  • Key props/types to define\n"
+            f"  • Accessibility and responsive design considerations"
+        )

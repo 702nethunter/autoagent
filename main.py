@@ -19,7 +19,7 @@ import sys
 
 import config
 import memory_store as ms
-from dev_agent import CppDeveloperAgent, DotNetDeveloperAgent
+from dev_agent import CppDeveloperAgent, DotNetDeveloperAgent, ReactDeveloperAgent
 from pm_agent import ProjectManagerAgent
 
 WIDTH = 70
@@ -131,11 +131,13 @@ def main() -> None:
     pm      = ProjectManagerAgent()
     dotnet  = DotNetDeveloperAgent()
     cpp_dev = CppDeveloperAgent()
+    react   = ReactDeveloperAgent()
 
     pm.register_dev(dotnet)
     pm.register_dev(cpp_dev)
+    pm.register_dev(react)
 
-    for agent in (pm, dotnet, cpp_dev):
+    for agent in (pm, dotnet, cpp_dev, react):
         print(f"  {agent.name} (id={agent.agent_id})")
 
     # ── Sprint planning (day 0) ────────────────────────────────────────────────
@@ -149,7 +151,7 @@ def main() -> None:
         separator(f"DAY {day}")
 
         # Dev agents work their tasks
-        for dev in (dotnet, cpp_dev):
+        for dev in (dotnet, cpp_dev, react):
             print(f"\n── {dev.name} working …")
             dev.act()
 
