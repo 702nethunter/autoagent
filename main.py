@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 import config
 import memory_store as ms
@@ -153,7 +154,7 @@ def main() -> None:
         # Dev agents work their tasks
         for dev in (dotnet, cpp_dev, react):
             print(f"\n── {dev.name} working …")
-            dev.act()
+            dev.act(output_dir=Path(f"output/local-run-day{day}"))
 
         # PM handles escalations mid-day
         pm.handle_escalations()

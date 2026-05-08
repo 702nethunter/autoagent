@@ -223,9 +223,14 @@ def main() -> None:
     # ── Sprint planning ────────────────────────────────────────────────────────
     sprint_plan_id = pm.plan_sprint(feature, sprint_name=f"Issue-{ISSUE_NUMBER}")
 
-    # ── One sprint day ─────────────────────────────────────────────────────────
+    # ── One sprint day — collect generated code artifacts ────────────────────
+    from pathlib import Path
+    output_dir = Path(f"output/issue-{ISSUE_NUMBER}")
+    all_artifacts: list[dict] = []
+
     for dev in (dotnet, cpp_dev, react):
-        dev.act()
+        _, artifacts = dev.act(output_dir=output_dir)
+        all_artifacts.extend(artifacts)
 
     pm.handle_escalations()
 
@@ -239,14 +244,31 @@ def main() -> None:
     task_rows = get_task_rows()
     incidents = ms.get_open_incidents()
 
-    # ── Post final comment ─────────────────────────────────────────────────────
+    # ── Post sprint report comment ─────────────────────────────────────────────
     comment = format_github_comment(
         feature, sprint_plan_id, task_rows, incidents, standup, retro
     )
     post_comment(comment)
-    add_label("agent-done")
 
-    log.info("Done. Results posted to GitHub Issue #%s.", ISSUE_NUMBER)
+    # ── Post generated code as separate comments (one per file) ───────────────
+    if all_artifacts:
+        for artifact in all_artifacts:
+            ext      = Path(artifact["filename"]).suffix.lstrip(".")
+            lang_map = {"tsx": "tsx", "cs": "csharp", "cpp": "cpp", "txt": ""}
+            lang     = lang_map.get(ext, ext)
+            code_comment = (
+                f"### 📄 `{artifact['filename']}`\n"
+                f"**Task:** {artifact['task_title']}\n\n"
+                f"<details>\n<summary>Implementation plan</summary>\n\n"
+                f"```\n{artifact['plan'][:800]}\n```\n</details>\n\n"
+                f"```{lang}\n{artifact['code']}\n```"
+            )
+            post_comment(code_comment)
+            log.info("Posted code file: %s (%d chars)", artifact["filename"], len(artifact["code"]))
+
+    add_label("agent-done")
+    log.info("Done. %d code files generated. Results posted to GitHub Issue #%s.",
+             len(all_artifacts), ISSUE_NUMBER)
 
 
 if __name__ == "__main__":

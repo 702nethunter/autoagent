@@ -1,35 +1,44 @@
 """
 dev_agent.py — Developer agent base class.
 
-Specialised subclasses:
-  DotNetDeveloperAgent  — C# / ASP.NET / EF Core / Azure
-  CppDeveloperAgent     — C++17/20, CMake, RAII, performance
+Each agent now produces actual code files (not just plans).
+Generated files are written to output_dir and returned so callers
+can post them to GitHub or upload as artifacts.
 
-Both agents share the same action loop:
+Action loop:
   1. Read inbox (PM assignments, escalations)
   2. Pick the highest-priority open task
-  3. Implement (generate a code plan / implementation summary via LLM)
-  4. Log progress to memory stream
-  5. Report any blockers as incidents
-  6. Reflect if threshold exceeded
+  3. Generate implementation plan
+  4. Generate actual code file(s)
+  5. Self-review for risks
+  6. Mark task status, log to memory stream
+  7. Reflect if threshold exceeded
 """
 
 from __future__ import annotations
 
+import os
 import random
+import re
+from pathlib import Path
 from typing import Optional
 
 import llm
 import memory_store as ms
 from base_agent import GenerativeAgent
 
+# Where generated files are written — can be overridden by callers
+DEFAULT_OUTPUT_DIR = Path("output")
+
 
 class DeveloperAgent(GenerativeAgent):
     """Shared behaviour for all developer agents."""
 
-    # Subclasses set these
     technology: str = "software"
     tech_context: str = ""
+    file_extension: str = ".txt"      # subclasses override
+
+    # ── Prompts ───────────────────────────────────────────────────────────────
 
     def _implementation_prompt(self, task_title: str, task_desc: str, ctx: str) -> str:
         return (
@@ -37,51 +46,92 @@ class DeveloperAgent(GenerativeAgent):
             f"Technology stack: {self.technology}\n"
             f"{self.tech_context}\n\n"
             f"Relevant memory / prior work:\n{ctx}\n\n"
-            f"Task assigned to you: {task_title}\n"
+            f"Task: {task_title}\n"
             f"Details: {task_desc or '(no additional details)'}\n\n"
             f"Write a concise implementation plan (3-5 bullet points). "
             f"Focus on technical approach, key files/classes, and edge cases."
         )
 
-    def _code_review_prompt(self, implementation: str) -> str:
+    def _code_prompt(self, task_title: str, task_desc: str, plan: str) -> str:
         return (
             f"{self._build_system_prompt()}\n\n"
-            f"You just planned this implementation:\n{implementation}\n\n"
-            f"Identify ONE potential risk or edge case you might have missed "
-            f"(1 sentence). If none, say 'No significant risks identified.'"
+            f"Technology stack: {self.technology}\n"
+            f"{self.tech_context}\n\n"
+            f"Task: {task_title}\n"
+            f"Details: {task_desc or '(no additional details)'}\n\n"
+            f"Implementation plan:\n{plan}\n\n"
+            f"Write the FULL implementation code for this task. "
+            f"Output ONLY the code — no explanations, no markdown fences. "
+            f"Make it production-quality and complete."
         )
 
-    def work_on_task(self, task: dict) -> str:
+    def _code_review_prompt(self, code: str) -> str:
+        return (
+            f"{self._build_system_prompt()}\n\n"
+            f"Review this code:\n{code[:600]}\n\n"
+            f"Identify ONE potential risk or edge case (1 sentence). "
+            f"If none, say 'No significant risks identified.'"
+        )
+
+    # ── Filename derivation ───────────────────────────────────────────────────
+
+    def _derive_filename(self, task_title: str) -> str:
+        """Turn a task title into a safe filename."""
+        slug = re.sub(r"[^a-zA-Z0-9]+", "_", task_title.lower()).strip("_")[:50]
+        return slug + self.file_extension
+
+    # ── Core work method ──────────────────────────────────────────────────────
+
+    def work_on_task(self, task: dict, output_dir: Path = DEFAULT_OUTPUT_DIR) -> dict:
         """
-        Work on a single task: plan → self-review → mark in_progress → observe.
-        Returns the implementation summary.
+        Work on a task: plan → generate code → self-review → save file.
+        Returns {"plan": str, "code": str, "filename": str, "filepath": Path, "risk": str}
         """
         title = task["title"]
         desc  = task.get("description", "")
         pid   = task["plan_id"]
 
         ctx  = self.context_text(title)
-        impl = llm.complete(
+
+        # Step 1: plan
+        plan = llm.complete(
             self._implementation_prompt(title, desc, ctx),
             temperature=0.6,
             max_tokens=350,
         )
 
-        # Self-review (simple internal reflection, not a full ToT vote)
-        risk = llm.complete(self._code_review_prompt(impl), temperature=0.4, max_tokens=80)
+        # Step 2: generate actual code
+        code = llm.complete(
+            self._code_prompt(title, desc, plan),
+            temperature=0.5,
+            max_tokens=800,
+        )
+
+        # Step 3: self-review
+        risk = llm.complete(
+            self._code_review_prompt(code),
+            temperature=0.4,
+            max_tokens=80,
+        )
+
+        # Step 4: save to disk
+        output_dir.mkdir(parents=True, exist_ok=True)
+        filename = self._derive_filename(title)
+        filepath = output_dir / filename
+        filepath.write_text(code, encoding="utf-8")
 
         ms.update_plan_status(pid, "in_progress")
-        self.observe(f"Working on task '{title}': {impl[:120]}")
-
+        self.observe(f"Implemented task '{title}' → {filename}")
         if "risk" in risk.lower() or "issue" in risk.lower() or "miss" in risk.lower():
-            self.observe(f"Self-review risk on task '{title}': {risk[:100]}")
+            self.observe(f"Self-review risk on '{title}': {risk[:100]}")
 
         print(f"  [{self.name}] Task: {title[:60]}")
-        print(f"    Plan: {impl[:180].replace(chr(10), ' ')}")
+        print(f"    → {filepath}  ({len(code)} chars)")
         if risk and "no significant" not in risk.lower():
             print(f"    Risk: {risk[:100]}")
 
-        return impl
+        return {"plan": plan, "code": code, "filename": filename,
+                "filepath": filepath, "risk": risk}
 
     def complete_task(self, task: dict) -> None:
         ms.update_plan_status(task["plan_id"], "done")
@@ -99,7 +149,12 @@ class DeveloperAgent(GenerativeAgent):
         self.observe(f"Blocked on task '{task['title']}': {reason[:80]}")
         return incident_id
 
-    def act(self, situation: str = "start of day") -> str:
+    def act(self, situation: str = "start of day",
+            output_dir: Path = DEFAULT_OUTPUT_DIR) -> tuple[str, list[dict]]:
+        """
+        Returns (status_string, list_of_artifact_dicts).
+        Each artifact dict: {filename, filepath, code, plan, task_title}
+        """
         # 1. Read inbox
         messages = self.read_inbox()
         for msg in messages:
@@ -111,15 +166,16 @@ class DeveloperAgent(GenerativeAgent):
             response = f"{self.name}: No tasks assigned. Awaiting instructions."
             self.observe("No open tasks — idle.")
             print(f"  [{self.name}] {response}")
-            return response
+            return response, []
 
-        task = tasks[0]  # already ordered by priority
+        task      = tasks[0]
+        artifacts = []
 
-        # 3. Simulate outcome: 80% success, 15% blocker, 5% incident
         roll = random.random()
         if roll < 0.80:
-            impl = self.work_on_task(task)
+            result = self.work_on_task(task, output_dir=output_dir)
             self.complete_task(task)
+            artifacts.append({**result, "task_title": task["title"]})
             response = f"Completed: {task['title']}"
         elif roll < 0.95:
             blocker = llm.complete(
@@ -131,7 +187,7 @@ class DeveloperAgent(GenerativeAgent):
             response = f"Blocked on: {task['title']} — {blocker}"
         else:
             desc = llm.complete(
-                f"Describe a realistic bug or incident encountered while working on: {task['title']} "
+                f"Describe a realistic bug encountered while working on: {task['title']} "
                 f"using {self.technology}. (2 sentences)",
                 temperature=0.7, max_tokens=100,
             )
@@ -143,16 +199,16 @@ class DeveloperAgent(GenerativeAgent):
             )
             response = f"Incident reported on: {task['title']}"
 
-        # 4. Reflect if threshold met
         self.reflect()
-        return response
+        return response, artifacts
 
 
 # ── Concrete agent subclasses ──────────────────────────────────────────────────
 
 class DotNetDeveloperAgent(DeveloperAgent):
-    technology   = ".NET / C# / ASP.NET Core / Entity Framework"
-    tech_context = (
+    technology     = ".NET / C# / ASP.NET Core / Entity Framework"
+    file_extension = ".cs"
+    tech_context   = (
         "You write clean C# code following SOLID principles. "
         "You prefer async/await, dependency injection, and repository patterns. "
         "You use xUnit for tests and Swagger for API documentation."
@@ -171,8 +227,9 @@ class DotNetDeveloperAgent(DeveloperAgent):
 
 
 class CppDeveloperAgent(DeveloperAgent):
-    technology   = "C++17/20 / CMake / STL / Boost"
-    tech_context = (
+    technology     = "C++17/20 / CMake / STL / Boost"
+    file_extension = ".cpp"
+    tech_context   = (
         "You write modern C++ using RAII, smart pointers, and move semantics. "
         "You avoid raw pointers and prefer std::span, std::optional, std::variant. "
         "You profile with Valgrind/perf and write unit tests with GoogleTest."
@@ -192,8 +249,9 @@ class CppDeveloperAgent(DeveloperAgent):
 
 
 class ReactDeveloperAgent(DeveloperAgent):
-    technology   = "React 18 / TypeScript / Vite / Tailwind CSS"
-    tech_context = (
+    technology     = "React 18 / TypeScript / Vite / Tailwind CSS"
+    file_extension = ".tsx"
+    tech_context   = (
         "You build React applications using functional components and hooks only — "
         "no class components. You use TypeScript strictly (no `any`). "
         "You prefer Zustand or React Query for state/server-state management. "
@@ -223,7 +281,7 @@ class ReactDeveloperAgent(DeveloperAgent):
             f"Technology stack: {self.technology}\n"
             f"{self.tech_context}\n\n"
             f"Relevant memory / prior work:\n{ctx}\n\n"
-            f"Task assigned to you: {task_title}\n"
+            f"Task: {task_title}\n"
             f"Details: {task_desc or '(no additional details)'}\n\n"
             f"Write a concise implementation plan (3-5 bullet points) covering:\n"
             f"  • Component hierarchy and file structure\n"
@@ -231,4 +289,17 @@ class ReactDeveloperAgent(DeveloperAgent):
             f"  • API integration points\n"
             f"  • Key props/types to define\n"
             f"  • Accessibility and responsive design considerations"
+        )
+
+    def _code_prompt(self, task_title: str, task_desc: str, plan: str) -> str:
+        return (
+            f"{self._build_system_prompt()}\n\n"
+            f"Technology stack: {self.technology}\n"
+            f"{self.tech_context}\n\n"
+            f"Task: {task_title}\n"
+            f"Details: {task_desc or '(no additional details)'}\n\n"
+            f"Implementation plan:\n{plan}\n\n"
+            f"Write the FULL React TypeScript component (.tsx) for this task. "
+            f"Output ONLY the code — no explanations, no markdown fences. "
+            f"Use proper TypeScript types, hooks, and Tailwind CSS classes."
         )

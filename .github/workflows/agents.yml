@@ -38,10 +38,12 @@ jobs:
           OLLAMA_URL:   ${{ secrets.OLLAMA_URL }}
         run: python3 run_from_issue.py
 
-      - name: Upload agent logs
+      - name: Upload agent logs and generated code
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: agent-run-${{ github.event.issue.number }}
-          path: agent_run.log
-          retention-days: 7
+          path: |
+            agent_run.log
+            output/
+          retention-days: 30
