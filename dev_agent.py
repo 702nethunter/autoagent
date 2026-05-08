@@ -28,7 +28,7 @@ import memory_store as ms
 from base_agent import GenerativeAgent
 
 # Where generated files are written — can be overridden by callers
-DEFAULT_OUTPUT_DIR = Path("output")
+DEFAULT_OUTPUT_DIR = Path("agentOutput")
 
 
 class DeveloperAgent(GenerativeAgent):

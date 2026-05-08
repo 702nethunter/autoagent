@@ -154,7 +154,7 @@ def main() -> None:
         # Dev agents work their tasks
         for dev in (dotnet, cpp_dev, react):
             print(f"\n── {dev.name} working …")
-            dev.act(output_dir=Path(f"output/local-run-day{day}"))
+            dev.act(output_dir=Path(f"agentOutput/local-run-day{day}"))
 
         # PM handles escalations mid-day
         pm.handle_escalations()

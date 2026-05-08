@@ -45,5 +45,5 @@ jobs:
           name: agent-run-${{ github.event.issue.number }}
           path: |
             agent_run.log
-            output/
+            agentOutput/
           retention-days: 30

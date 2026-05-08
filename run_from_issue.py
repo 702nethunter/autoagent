@@ -225,7 +225,7 @@ def main() -> None:
 
     # ── One sprint day — collect generated code artifacts ────────────────────
     from pathlib import Path
-    output_dir = Path(f"output/issue-{ISSUE_NUMBER}")
+    output_dir = Path(f"agentOutput/issue-{ISSUE_NUMBER}")
     all_artifacts: list[dict] = []
 
     for dev in (dotnet, cpp_dev, react):
