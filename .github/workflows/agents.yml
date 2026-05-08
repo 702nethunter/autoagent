@@ -1,0 +1,50 @@
+name: Dev Agents — Auto Sprint
+
+on:
+  issues:
+    types: [opened, labeled]
+
+jobs:
+  run-agents:
+    name: Run generative dev agents
+    runs-on: self-hosted          # Mac laptop runner
+
+    # Only process issues with the "agent-task" label OR any newly opened issue
+    if: |
+      github.event.action == 'opened' ||
+      contains(github.event.issue.labels.*.name, 'agent-task')
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install pyodbc requests
+
+      - name: Run agents on issue
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_TITLE:  ${{ github.event.issue.title }}
+          ISSUE_BODY:   ${{ github.event.issue.body }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO:         ${{ github.repository }}
+          SQL_SERVER:   ${{ secrets.SQL_SERVER }}
+          SQL_PASSWORD: ${{ secrets.SQL_PASSWORD }}
+          SQL_USER:     ${{ secrets.SQL_USER }}
+          SQL_DATABASE: ${{ secrets.SQL_DATABASE }}
+        run: |
+          cd dev_agents
+          python3 run_from_issue.py
+
+      - name: Upload agent logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-run-${{ github.event.issue.number }}
+          path: dev_agents/agent_run.log
+          retention-days: 7
